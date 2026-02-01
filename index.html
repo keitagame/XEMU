@@ -129,6 +129,28 @@ border:1px solid rgb(255, 255, 255);
     
 
     <script type="module">
+function drawTestPattern(x68k) {
+  const mem = x68k.memory;
+
+  // 全プレーン初期化
+  for (let p = 0; p < 4; p++) {
+    mem.gvr[p].fill(0);
+  }
+
+  // 512x512 / 8px単位で縦縞
+  for (let y = 0; y < 512; y++) {
+    for (let bx = 0; bx < 512 / 8; bx++) {
+      const addr = y * (512 / 8) + bx;
+
+      // 0〜15を繰り返す
+      const col = (bx >> 1) & 0xF;
+
+      for (let p = 0; p < 4; p++) {
+        mem.gvr[p][addr] = ((col >> p) & 1) ? 0xFF : 0x00;
+      }
+    }
+  }
+}
 
 /* =========================
    X68000 Core
@@ -137,9 +159,10 @@ class X68000 {
   constructor(canvas) {
     this.cpu = new MC68000(this);
     this.memory = new MemoryMap();
-    this.video = new VideoSubsystem(canvas);
+    this.video = new VideoSubsystem(canvas,this);
     this.sound = new SoundSubsystem();
     this.input = new InputSubsystem();
+this.crtc = new CRTC();
 
     this.running = false;
     this.lastTime = 0;
@@ -475,6 +498,15 @@ class MemoryMap {
     this.rom = null;
     this.iplrom = null;                       // IPL ROM
     this.cgrom = null;  
+    this.gvr = [
+      new Uint8Array(0x20000), // Plane0
+      new Uint8Array(0x20000), // Plane1
+      new Uint8Array(0x20000), // Plane2
+      new Uint8Array(0x20000)  // Plane3
+    ];
+
+    this.tram = new Uint16Array(0x10000); // Text VRAM
+    this.palette = new Uint16Array(256); // 12bit RGB
   }
 
   reset() {
@@ -496,7 +528,11 @@ loadIPLROM(buffer) {
 
   read8(addr) {
     addr &= 0xFFFFFF; // 24bitアドレス
-
+if (addr >= 0xC00000 && addr < 0xE00000) {
+      const offset = addr - 0xC00000;
+      const plane = (offset >> 17) & 3;
+      return this.gvr[plane][offset & 0x1FFFF];
+    }
     // IPL ROM: 0x000000-0x0BFFFF (768KB) または 0x0FFFFF (1MB)
     if (addr < 0x100000 && this.iplrom && addr < this.iplrom.length) {
       return this.iplrom[addr];
@@ -521,7 +557,12 @@ loadIPLROM(buffer) {
 
   write8(addr, value) {
     addr &= 0xFFFFFF;
-
+if (addr >= 0xC00000 && addr < 0xE00000) {
+      const offset = addr - 0xC00000;
+      const plane = (offset >> 17) & 3;
+      this.gvr[plane][offset & 0x1FFFF] = value;
+      return;
+    }
     // RAM領域のみ書き込み可能
     if (addr < 0x200000) {
       this.ram[addr] = value & 0xFF;
@@ -539,35 +580,64 @@ loadIPLROM(buffer) {
   }
 
 }
-
-/* =========================
-   Video Subsystem
-========================= */
-class VideoSubsystem {
-  constructor(canvas) {
-    this.ctx = canvas.getContext("2d");
-    this.width = 256;
-    this.height = 240;
-    this.image = this.ctx.createImageData(this.width, this.height);
-  }
-
-  reset() {
-    this.clear();
-  }
-
-  clear() {
-    this.image.data.fill(0);
-  }
-
-  render() {
-    // 仮：黒画面
-    this.ctx.putImageData(this.image, 0, 0);
+class CRTC {
+  constructor() {
+    this.hRes = 512;
+    this.vRes = 512;
+    this.displayEnable = true;
   }
 }
 
 /* =========================
+   Video Subsystem
+========================= */
+
+
+/* =========================
    Sound Subsystem (Stub)
 ========================= */
+class VideoSubsystem {
+  constructor(canvas, system) {
+    this.sys = system;
+    this.ctx = canvas.getContext("2d");
+    this.image = this.ctx.createImageData(512, 512);
+  }
+reset() {
+    this.clear();
+  }
+  clear() {
+    this.image.data.fill(0);
+  }
+  render() {
+    const mem = this.sys.memory;
+    const pal = mem.palette;
+    const data = this.image.data;
+
+    let ptr = 0;
+    for (let y = 0; y < 512; y++) {
+      for (let x = 0; x < 512; x++) {
+
+        // VRAM address (1byte = 8px 横方向)
+        const addr = (y * 512 + x) >> 3;
+        const bit = 7 - (x & 7);
+
+        let color =
+          ((mem.gvr[0][addr] >> bit) & 1) |
+          (((mem.gvr[1][addr] >> bit) & 1) << 1) |
+          (((mem.gvr[2][addr] >> bit) & 1) << 2) |
+          (((mem.gvr[3][addr] >> bit) & 1) << 3);
+
+        const rgb = pal[color];
+        data[ptr++] = ((rgb >> 8) & 0xF) * 17;
+        data[ptr++] = ((rgb >> 4) & 0xF) * 17;
+        data[ptr++] = (rgb & 0xF) * 17;
+        data[ptr++] = 255;
+      }
+    }
+
+    this.ctx.putImageData(this.image, 0, 0);
+  }
+}
 class SoundSubsystem {
   reset() {}
 }
@@ -658,7 +728,10 @@ startBtn.addEventListener("click", () => {
   }
   
   x68k.reset();
+
+
   x68k.start();
+drawTestPattern(x68k);
   status.textContent = "Running";
 });
 
