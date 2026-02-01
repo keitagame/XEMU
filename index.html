@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>X68000</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="nes.png" type="image/png">
+    <style>
+       :root {
+        color-scheme: light dark;
+      }
+      @font-face {
+  font-family: "Renner";
+  src: url("./Renner.ttf") format("truetype");
+  font-display: swap;
+ 
+}
+      body {
+        background:rgb(0, 0, 0);
+       font-family: "Renner", sans-serif;
+        margin: 0;
+        padding:0;
+      }
+h1{
+font-weight:300;
+font-size:25px;
+}
+      header {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      canvas{
+        
+        height: 100%;              /* コンテナ幅に合わせる */
+      aspect-ratio: 256 / 240;  /* 内部解像度の比率を維持 */
+        image-rendering: pixelated;
+        border: 1px solid #000000;
+        background: #000;
+      }
+      .row {
+        padding-top:0px;
+height:83vh;
+justify-content: center; 
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .mono {
+       font-size:20px; 
+      }
+      small {
+        opacity: 0.7;
+      }
+      
+button{
+font-family: "Renner", sans-serif;
+padding:10px;
+background:rgb(0, 0, 0);
+color:rgb(255, 255, 255);
+border:1px solid rgb(255, 255, 255);
+}
+.file-input {
+  display: none; /* 本体は隠す */
+}
+
+.file-label {
+  display: inline-block;
+  padding: 10px 16px;
+  background: #000000;
+  color: white;
+    border:1px solid white;
+  border-radius: 0px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+
+
+    </style>
+  </head>
+  <body>
+   
+    <header>
+<h1>X68000</h1>
+      
+<label class="file-label">
+  Select
+  <input id="rom" type="file" class="file-input">
+</label>
+<span id="file-name"></span>
+
+      
+      <button id="fullscreenBtn">Fullscreen</button>
+
+      <button id="start">Start</button>
+      <div class="mono" id="status">No ROM</div>
+      <div><span class="mono">CPU PC:</span> <span id="pc" class="mono">0x0000</span></div>
+    </header>
+    <div class="row">
+      <canvas id="screen" width="256" height="240"></canvas>
+      <div style="display:none">
+        <div><b>FPS:</b> <span id="fps">0</span></div>
+        <div><b>CPU PC:</b> <span id="pc" class="mono">0x0000</span></div>
+        <div><b>Cycles:</b> <span id="cyc" class="mono">0</span></div>
+        <div><b>VRAM V:</b><span id="pcp" class="mono">0x0000</span></div>
+        <div><b>VRAM T:</b><span id="ppx" class="mono">0x0000</span></div>
+        <div><b>CPU S:</b><span id="ram" class="mono">0x0000</span></div>
+        <div><b>CPU P:</b><span id="mapper" class="mono">0x0000</span></div>
+
+        
+      </div>
+    </div>
+
+    
+
+    <script type="module">
+
+/* =========================
+   X68000 Core
+========================= */
+class X68000 {
+  constructor(canvas) {
+    this.cpu = new MC68000(this);
+    this.memory = new MemoryMap();
+    this.video = new VideoSubsystem(canvas);
+    this.sound = new SoundSubsystem();
+    this.input = new InputSubsystem();
+
+    this.running = false;
+    this.lastTime = 0;
+  }
+
+  reset() {
+    this.memory.reset();
+    this.cpu.reset();
+    this.video.reset();
+    this.sound.reset();
+    this.running = false;
+  }
+
+  loadROM(buffer) {
+    this.memory.loadROM(buffer);
+  }
+
+  start() {
+    this.running = true;
+    requestAnimationFrame(this.loop.bind(this));
+  }
+
+  loop(time) {
+    if (!this.running) return;
+
+    const delta = time - this.lastTime;
+    this.lastTime = time;
+
+    // 1フレーム分実行（仮）
+    this.stepFrame();
+
+    this.video.render();
+
+    requestAnimationFrame(this.loop.bind(this));
+  }
+
+  stepFrame() {
+    const CYCLES_PER_FRAME = 100000; // 仮
+
+    let cycles = 0;
+    while (cycles < CYCLES_PER_FRAME) {
+      cycles += this.cpu.step();
+    }
+  }
+}
+
+/* =========================
+   MC68000 CPU (Stub)
+========================= */
+class MC68000 {
+  constructor(system) {
+    this.system = system;
+    this.pc = 0;
+    this.cycles = 0;
+  }
+
+  reset() {
+    this.pc = 0x000000;
+    this.cycles = 0;
+  }
+
+  step() {
+    // TODO: 命令フェッチ・デコード・実行
+    this.pc += 2;       // 仮
+    this.cycles += 4;  // 仮
+    return 4;
+  }
+}
+
+/* =========================
+   Memory Map
+========================= */
+class MemoryMap {
+  constructor() {
+    this.ram = new Uint8Array(0x200000); // 2MB RAM
+    this.rom = null;
+  }
+
+  reset() {
+    this.ram.fill(0);
+  }
+
+  loadROM(buffer) {
+    this.rom = new Uint8Array(buffer);
+  }
+
+  read8(addr) {
+    if (addr < this.ram.length) return this.ram[addr];
+    return 0xFF;
+  }
+
+  write8(addr, value) {
+    if (addr < this.ram.length) {
+      this.ram[addr] = value;
+    }
+  }
+}
+
+/* =========================
+   Video Subsystem
+========================= */
+class VideoSubsystem {
+  constructor(canvas) {
+    this.ctx = canvas.getContext("2d");
+    this.width = 256;
+    this.height = 240;
+    this.image = this.ctx.createImageData(this.width, this.height);
+  }
+
+  reset() {
+    this.clear();
+  }
+
+  clear() {
+    this.image.data.fill(0);
+  }
+
+  render() {
+    // 仮：黒画面
+    this.ctx.putImageData(this.image, 0, 0);
+  }
+}
+
+/* =========================
+   Sound Subsystem (Stub)
+========================= */
+class SoundSubsystem {
+  reset() {}
+}
+
+/* =========================
+   Input Subsystem
+========================= */
+class InputSubsystem {
+  constructor() {
+    this.keys = {};
+    window.addEventListener("keydown", e => this.keys[e.code] = true);
+    window.addEventListener("keyup", e => this.keys[e.code] = false);
+  }
+}
+
+/* =========================
+   UI Wiring
+========================= */
+const canvas = document.getElementById("screen");
+const status = document.getElementById("status");
+const pcView = document.getElementById("pc");
+
+const x68k = new X68000(canvas);
+
+document.getElementById("rom").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  document.getElementById("file-name").textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    x68k.loadROM(reader.result);
+    status.textContent = "ROM Loaded";
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+document.getElementById("start").addEventListener("click", () => {
+  x68k.reset();
+  x68k.start();
+  status.textContent = "Running";
+});
+
+setInterval(() => {
+  pcView.textContent = "0x" + x68k.cpu.pc.toString(16).padStart(6, "0");
+}, 100);
+
+</script>
+
+
+
+  </body>
+</html>
