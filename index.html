@@ -508,6 +508,16 @@ class MemoryMap {
     this.tram = new Uint16Array(0x10000); // Text VRAM
     this.palette = new Uint16Array(256); // 12bit RGB
   }
+getFontBitmap(charCode, row) {
+  if (!this.cgrom) return 0;
+
+  const FONT8X8_BASE = 0x00000;
+  return this.cgrom[
+    FONT8X8_BASE + (charCode * 8) + (7 - row)
+  ] || 0;
+}
+
+
 
   reset() {
     this.ram.fill(0);
@@ -608,6 +618,45 @@ reset() {
   clear() {
     this.image.data.fill(0);
   }
+renderTextLayer(data) {
+  const mem = this.sys.memory;
+
+  const cols = 64; // 512 / 8
+  const rows = 64;
+
+  for (let ty = 0; ty < rows; ty++) {
+    for (let tx = 0; tx < cols; tx++) {
+
+      const t = mem.tram[ty * 1024 + tx];
+      const charCode = (t >> 8) & 0xFF;
+      const color = t & 0x0F;
+
+      if (charCode === 0) continue;
+
+      for (let cy = 0; cy < 8; cy++) {
+
+
+        const bits = mem.getFontBitmap(charCode, cy);
+
+
+        for (let cx = 0; cx < 8; cx++) {
+          if ((bits & (0x80 >> cx)) === 0) continue;
+
+          const px = tx * 8 + cx;
+          const py = ty * 8 + cy;
+          const p  = (py * 512 + px) * 4;
+
+          const rgb = mem.palette[color];
+          data[p + 0] = ((rgb >> 8) & 0xF) * 17;
+          data[p + 1] = ((rgb >> 4) & 0xF) * 17;
+          data[p + 2] = (rgb & 0xF) * 17;
+          data[p + 3] = 255;
+        }
+      }
+    }
+  }
+}
+
   render() {
     const mem = this.sys.memory;
     const pal = mem.palette;
@@ -634,12 +683,49 @@ reset() {
         data[ptr++] = 255;
       }
     }
-
+this.renderTextLayer(data);
     this.ctx.putImageData(this.image, 0, 0);
   }
 }
 class SoundSubsystem {
   reset() {}
+}
+function drawTextTest(x68k) {
+  const mem = x68k.memory;
+  mem.tram.fill(0);
+
+  const text = "HELLO X68000";
+  for (let i = 0; i < text.length; i++) {
+    const ascii = text.charCodeAt(i);
+
+    // ★ 変換しない
+//mem.tram[0] = (0x41 << 8) | 0x04; // 'A'
+
+    mem.tram[i] = (ascii << 8) | 0x04; // 白
+  }
+}
+
+
+function asciiToX68kFont(code) {
+  // 数字 0–9
+  if (code >= 0x30 && code <= 0x39) {
+    return 0x10 + (code - 0x30);
+  }
+
+  // 英大文字 A–Z
+  if (code >= 0x41 && code <= 0x5A) {
+    return 0x20 + (code - 0x41);
+  }
+
+  // 英小文字 a–z
+  if (code >= 0x61 && code <= 0x7A) {
+    return 0x40 + (code - 0x61);
+  }
+
+  // スペース
+  if (code === 0x20) return 0x00;
+
+  return 0x00;
 }
 
 /* =========================
@@ -729,9 +815,13 @@ startBtn.addEventListener("click", () => {
   
   x68k.reset();
 
+x68k.memory.palette[0] = 0x000;
+x68k.memory.palette[4] = 0xFFF;
 
   x68k.start();
-drawTestPattern(x68k);
+console.log(x68k.memory.cgrom.length);
+
+drawTextTest(x68k);
   status.textContent = "Running";
 });
 
